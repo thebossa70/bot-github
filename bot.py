@@ -8,7 +8,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-KEYWORDS = ["private_key", "seed phrase", "mnemonic", "api_key", ".env"]
+KEYWORDS = ["private_key=", "seed phrase=", "mnemonic", "api_key=", ".env"]
 
 INTERVAL = 60
 MINUTES_BACK = 10
