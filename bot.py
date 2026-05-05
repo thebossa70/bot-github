@@ -1,66 +1,106 @@
-import requests
-import time
-import json
 import os
-from datetime import datetime, timedelta
+import re
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
+# ===== VARIABLES =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-KEYWORDS = ["private_key=", "seed phrase=", "mnemonic=", "api_key="]
+# ===== CONFIG =====
+KEYWORDS = ["mint", "privateKey", 'seenphrase", "token", "private_key=", "seed phrase=", "mnemonic=", "api_key="]
 
-INTERVAL = 60
-MINUTES_BACK = 10
+# ===== REGEX =====
+SOLANA_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
+PRIVATE_KEY_REGEX = r"\b([A-Fa-f0-9]{64}|[1-9A-HJ-NP-Za-km-z]{64,})\b"
+JSON_KEY_REGEX = r'("privateKey"\s*:\s*".+?"|"secret"\s*:\s*".+?")'
 
-SEEN_FILE = "seen_repos.json"
 
-if os.path.exists(SEEN_FILE):
-    with open(SEEN_FILE, "r") as f:
-        seen = set(json.load(f))
-else:
-    seen = set()
+# ===== FUNCIONES =====
 
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": msg
-    })
+def extract_code_blocks(text, entities):
+    if not text or not entities:
+        return []
 
-def search_new_repos(keyword):
-    time_limit = (datetime.utcnow() - timedelta(minutes=MINUTES_BACK)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    query = f"{keyword} created:>{time_limit}"
-    url = f"https://api.github.com/search/repositories?q={query}&sort=created&order=desc"
+    blocks = []
+    for ent in entities:
+        if ent.type in ["pre", "code"]:
+            start = ent.offset
+            end = ent.offset + ent.length
+            blocks.append(text[start:end])
 
-    headers = {}
-    if GITHUB_TOKEN:
-        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+    return blocks
 
-    res = requests.get(url, headers=headers)
-    return res.json().get("items", [])
 
-def run():
-    print("Bot iniciado...")
+def contains_exact_keyword(text):
+    for word in KEYWORDS:
+        pattern = r"\b" + re.escape(word) + r"\b"
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
 
-    while True:
-        for keyword in KEYWORDS:
-            repos = search_new_repos(keyword)
 
-            for repo in repos:
-                url = repo["html_url"]
+def detect_crypto(text):
+    findings = []
 
-                if url not in seen:
-                    seen.add(url)
+    if re.search(SOLANA_REGEX, text):
+        findings.append("🪙 Wallet Solana detectada")
 
-                    msg = f"Nuevo repo ({keyword}):\n{url}"
-                    print(msg)
-                    send_telegram(msg)
+    if re.search(PRIVATE_KEY_REGEX, text):
+        findings.append("🔑 Posible private key")
 
-        with open(SEEN_FILE, "w") as f:
-            json.dump(list(seen), f)
+    if re.search(JSON_KEY_REGEX, text):
+        findings.append("📦 JSON con claves")
 
-        time.sleep(INTERVAL)
+    return findings
 
-if __name__ == "__main__":
-    run()
+
+def should_alert(message):
+    text = message.text or message.caption
+    entities = message.entities or message.caption_entities
+
+    code_blocks = extract_code_blocks(text, entities)
+
+    if not code_blocks:
+        return False, None, None
+
+    for block in code_blocks:
+        if contains_exact_keyword(block):
+            crypto_hits = detect_crypto(block)
+            return True, block, crypto_hits
+
+    return False, None, None
+
+
+# ===== HANDLER =====
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+
+    alert, block, crypto_hits = should_alert(msg)
+
+    if alert:
+        response = "🚨 ALERTA EN CÓDIGO 🚨\n\n"
+        response += f"{block}\n\n"
+
+        if crypto_hits:
+            response += "⚠️ Detectado:\n"
+            for hit in crypto_hits:
+                response += f"- {hit}\n"
+
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=response
+        )
+
+        print("✅ Alerta enviada")
+
+
+# ===== MAIN =====
+
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+app.add_handler(MessageHandler(filters.ALL, handle_message))
+
+print("🤖 Bot activo...")
+app.run_polling()
