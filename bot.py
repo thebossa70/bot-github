@@ -98,6 +98,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== MAIN =====
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+# 👇 AGREGA ESTA LÍNEA JUSTO AQUÍ
+app.bot.delete_webhook(drop_pending_updates=True)
+
 app.add_handler(MessageHandler(filters.ALL, handle_message))
 
 print("🤖 Bot ALPHA activo...")
