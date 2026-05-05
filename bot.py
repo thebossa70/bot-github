@@ -97,12 +97,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== MAIN =====
 
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+import asyncio
 
-# 👇 AGREGA ESTA LÍNEA JUSTO AQUÍ
-app.bot.delete_webhook(drop_pending_updates=True)
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-app.add_handler(MessageHandler(filters.ALL, handle_message))
+    # limpia conflictos anteriores correctamente
+    await app.bot.delete_webhook(drop_pending_updates=True)
 
-print("🤖 Bot ALPHA activo...")
-app.run_polling()
+    app.add_handler(MessageHandler(filters.ALL, handle_message))
+
+    print("🤖 Bot ALPHA limpio y activo...")
+    await app.run_polling()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
