@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from telegram.ext import ApplicationBuilder, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 # ===== VARIABLES =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -11,7 +11,12 @@ ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
 # ===== CONFIG =====
 SEARCH_TERMS = [
-    "wallet",
+    "privateKey",
+    "mnemonic",
+    "seed phrase",
+    "api_key",
+    "SECRET_KEY",
+    "PRIVATE_KEY"
 ]
 
 SEEN_URLS = set()
@@ -20,6 +25,7 @@ SEEN_COMMITS = set()
 # ===== REGEX =====
 ETH_REGEX = r"\b0x[a-fA-F0-9]{40}\b"
 SOL_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
+PRIVATE_KEY_REGEX = r"\b([A-Fa-f0-9]{64}|[1-9A-HJ-NP-Za-km-z]{64,})\b"
 
 # ===== ETH BALANCE =====
 def get_eth_balance(address):
@@ -51,19 +57,25 @@ def get_sol_balance(address):
 def analyze_content(text):
     findings = []
 
+    # ETH
     for addr in re.findall(ETH_REGEX, text):
         bal = get_eth_balance(addr)
         if bal > 0:
             findings.append(f"🟣 ETH: {addr} | 💰 {bal:.4f}")
 
+    # SOL
     for addr in re.findall(SOL_REGEX, text):
         bal = get_sol_balance(addr)
         if bal > 0:
             findings.append(f"🟢 SOL: {addr} | 💰 {bal:.4f}")
 
+    # PRIVATE KEY
+    if re.search(PRIVATE_KEY_REGEX, text):
+        findings.append("🔑 POSIBLE PRIVATE KEY DETECTADA")
+
     return findings
 
-# ===== GITHUB SEARCH (ARCHIVOS) =====
+# ===== GITHUB SEARCH =====
 def search_github():
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     results = []
@@ -104,11 +116,10 @@ def search_github():
 
     return results
 
-# ===== GITHUB TIEMPO REAL (COMMITS) =====
+# ===== GITHUB COMMITS =====
 def monitor_commits():
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     url = "https://api.github.com/events"
-
     results = []
 
     try:
@@ -134,15 +145,12 @@ def monitor_commits():
                     continue
 
                 msg = f"🚨 POSIBLE LEAK EN COMMIT 🚨\n\n📦 {repo}\n📝 {message}\n🔗 https://github.com/{repo}"
-
                 results.append(msg)
 
     except:
         pass
 
     return results
-
-from telegram.ext import ApplicationBuilder, ContextTypes
 
 # ===== JOB =====
 async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
@@ -162,19 +170,45 @@ async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(chat_id=CHAT_ID, text=r)
         except Exception as e:
-            print("ERROR sending message:", e)
+            print("ERROR sending:", e)
 
+# ===== RESPUESTA MANUAL =====
+async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+
+    findings = []
+
+    # detectar wallets en cualquier texto
+    for addr in re.findall(ETH_REGEX, text):
+        bal = get_eth_balance(addr)
+        findings.append(f"🟣 ETH: {addr} | 💰 {bal:.6f}")
+
+    for addr in re.findall(SOL_REGEX, text):
+        bal = get_sol_balance(addr)
+        findings.append(f"🟢 SOL: {addr} | 💰 {bal:.6f}")
+
+    # detectar private keys
+    if re.search(PRIVATE_KEY_REGEX, text):
+        findings.append("🔑 POSIBLE PRIVATE KEY DETECTADA")
+
+    if findings:
+        await update.message.reply_text("\n".join(findings))
+    else:
+        await update.message.reply_text("❌ No se detectó nada válido")
 
 # ===== MAIN =====
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-# limpiar webhook automáticamente
+# eliminar webhook (evita conflictos)
 app.post_init = lambda app: app.bot.delete_webhook(drop_pending_updates=True)
 
-# job cada 30s
+# handler mensajes
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+# job automático
 app.job_queue.run_repeating(github_monitor, interval=30, first=5)
 
 print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 
-# iniciar bot (SIN asyncio.run)
+# iniciar bot
 app.run_polling()
