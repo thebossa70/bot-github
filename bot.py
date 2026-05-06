@@ -11,12 +11,7 @@ ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
 # ===== CONFIG =====
 SEARCH_TERMS = [
-    "privateKey",
-    "mnemonic",
-    "seed phrase",
-    "api_key",
-    "SECRET_KEY",
-    "PRIVATE_KEY"
+    "wallet",
 ]
 
 SEEN_URLS = set()
