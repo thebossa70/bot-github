@@ -25,6 +25,48 @@ SEARCH_TERMS = [
 
 SEEN_URLS = set()
 
+def github_monitor(context):
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}"
+    }
+
+    url = "https://api.github.com/events"
+
+    try:
+        r = requests.get(url, headers=headers, timeout=10).json()
+
+        for event in r:
+
+            if event["type"] != "PushEvent":
+                continue
+
+            repo = event["repo"]["name"]
+
+            for commit in event["payload"]["commits"]:
+                commit_id = commit["sha"]
+
+                if commit_id in seen_commits:
+                    continue
+
+                seen_commits.add(commit_id)
+
+                message = commit["message"]
+
+                if any(k in message.lower() for k in KEYWORDS):
+
+                    msg = f"""
+🚨 POSIBLE LEAK EN TIEMPO REAL 🚨
+
+📦 Repo: {repo}
+📝 Commit: {message}
+🔗 https://github.com/{repo}
+"""
+
+                    context.bot.send_message(chat_id=CHAT_ID, text=msg)
+
+    except Exception as e:
+        print("ERROR GITHUB:", e)
+
 # ===== REGEX =====
 ETH_REGEX = r"\b0x[a-fA-F0-9]{40}\b"
 SOLANA_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
@@ -104,7 +146,7 @@ def search_github():
     results = []
 
     for term in SEARCH_TERMS:
-        url = f"https://api.github.com/search/code?q={term}+crypto+in:file+extension:py+extension:js&sort=indexed&order=desc"
+        url = f"https://api.github.com/events?q={term}+crypto+in:file+extension:py+extension:js&sort=indexed&order=desc"
 
         try:
             r = requests.get(url, headers=headers).json()
@@ -167,6 +209,13 @@ async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
 # ===== MAIN =====
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+# 🔥 AQUI AGREGAS EL JOB
+app.job_queue.run_repeating(github_monitor, interval=30, first=5)
+
+print("🤖 BOT ELITE ACTIVO (LEAK + TIEMPO REAL)")
+
+app.run_polling()
 
 # limpiar webhook (forma correcta sin asyncio.run)
 async def setup():
