@@ -16,9 +16,14 @@ MIN_ETH = 0
 MIN_SOL = 0
 
 SEARCH_TERMS = [
-    "password",
-    "config",
-    "token"
+    "privateKey",
+    "mnemonic",
+    "seed phrase",
+    "api_key",
+    "SECRET_KEY",
+    "wallet =",
+    "PRIVATE_KEY =",
+    "mnemonic ="
 ]
 
 SEEN_URLS = set()
@@ -116,7 +121,7 @@ def search_github():
     results = []
 
     for term in SEARCH_TERMS:
-        url = f"https://api.github.com/search/code?q={term}&sort=indexed&order=desc"
+        url = f"https://api.github.com/search/code?q={term}+in:file+extension:py+extension:js&sort=indexed&order=desc"
 
         try:
             r = requests.get(url, headers=headers).json()
