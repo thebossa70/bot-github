@@ -147,6 +147,8 @@ def monitor_commits():
 
     return results
 
+from telegram.ext import ApplicationBuilder, ContextTypes
+
 # ===== JOB =====
 async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
     results = []
@@ -168,23 +170,16 @@ async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
             print("ERROR sending message:", e)
 
 
-from telegram.ext import ApplicationBuilder, ContextTypes
-import asyncio
-
 # ===== MAIN =====
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # limpiar webhook (evita conflictos)
-    await app.bot.delete_webhook(drop_pending_updates=True)
+# limpiar webhook automáticamente
+app.post_init = lambda app: app.bot.delete_webhook(drop_pending_updates=True)
 
-    # job cada 30s
-    app.job_queue.run_repeating(github_monitor, interval=30, first=5)
+# job cada 30s
+app.job_queue.run_repeating(github_monitor, interval=30, first=5)
 
-    print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
+print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 
-    await app.run_polling()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# iniciar bot (SIN asyncio.run)
+app.run_polling()
