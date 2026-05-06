@@ -151,21 +151,40 @@ def monitor_commits():
 async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
     results = []
 
-    results += search_github()
-    results += monitor_commits()
+    try:
+        results += search_github()
+    except Exception as e:
+        print("ERROR search_github:", e)
+
+    try:
+        results += monitor_commits()
+    except Exception as e:
+        print("ERROR monitor_commits:", e)
 
     for r in results:
-        await context.bot.send_message(chat_id=CHAT_ID, text=r)
+        try:
+            await context.bot.send_message(chat_id=CHAT_ID, text=r)
+        except Exception as e:
+            print("ERROR sending message:", e)
+
+
+from telegram.ext import ApplicationBuilder, ContextTypes
+import asyncio
 
 # ===== MAIN =====
-def main():
+async def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
+    # limpiar webhook (evita conflictos)
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    # job cada 30s
     app.job_queue.run_repeating(github_monitor, interval=30, first=5)
 
     print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 
-    app.run_polling(drop_pending_updates=True)
+    await app.run_polling()
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
