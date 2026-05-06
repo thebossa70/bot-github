@@ -165,23 +165,23 @@ async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=CHAT_ID, text=r)
 
 # ===== MAIN =====
-import asyncio
 
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # limpiar webhook
+# limpiar webhook (forma correcta sin asyncio.run)
+async def setup():
     await app.bot.delete_webhook(drop_pending_updates=True)
 
-    # job automático
-    app.job_queue.run_repeating(github_monitor, interval=60, first=10)
+import asyncio
+asyncio.get_event_loop().run_until_complete(setup())
 
-    print("🤖 BOT ELITE ACTIVO (LEAK + DINERO)")
+# job automático
+app.job_queue.run_repeating(github_monitor, interval=60, first=10)
 
-    await app.run_polling()
+print("🤖 BOT ELITE ACTIVO (LEAK + DINERO)")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# correr bot
+app.run_polling()
 
 # loop cada 60s
 app.job_queue.run_repeating(github_monitor, interval=60, first=10)
