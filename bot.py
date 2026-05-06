@@ -169,7 +169,21 @@ app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 # limpiar webhook
 asyncio.get_event_loop().run_until_complete(
-    app.bot.delete_webhook(drop_pending_updates=True)
+    import asyncio
+
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    app.job_queue.run_repeating(github_monitor, interval=60, first=10)
+
+    print("🤖 BOT ELITE ACTIVO (LEAK + DINERO)")
+
+    await app.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 )
 
 # loop cada 60s
