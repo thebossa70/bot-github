@@ -197,7 +197,26 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No se detectó nada válido")
 
 # ===== MAIN =====
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # 🔥 limpiar webhook SIEMPRE antes de iniciar
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    # handler mensajes
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # job automático
+    app.job_queue.run_repeating(github_monitor, interval=30, first=5)
+
+    print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
+
+    await app.run_polling()
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 
 # eliminar webhook (evita conflictos)
 app.post_init = lambda app: app.bot.delete_webhook(drop_pending_updates=True)
