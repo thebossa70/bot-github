@@ -10,7 +10,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-# ===== CONFIG =====
+# ===== CONFIGU =====
 MIN_ETH = 0
 MIN_SOL = 0
 
