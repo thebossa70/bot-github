@@ -3,6 +3,7 @@ import re
 import asyncio
 import requests
 
+from telegram.error import Conflict
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -411,5 +412,7 @@ print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 # ===== START =====
 app.run_polling(
     drop_pending_updates=True,
-    allowed_updates=["message"]
+    allowed_updates=["message"],
+    close_loop=False,
+    stop_signals=None
 )
