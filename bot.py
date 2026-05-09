@@ -3,6 +3,7 @@ import re
 import asyncio
 import requests
 
+from telegram import Update
 from telegram.error import Conflict
 from telegram.ext import (
     ApplicationBuilder,
@@ -69,7 +70,7 @@ def get_eth_balance(address):
 
         r = session.get(url, timeout=10)
 
-        if r.status_code != 200:
+        print(r.text)
             return 0
 
         data = r.json()
@@ -97,7 +98,7 @@ def get_sol_balance(address):
 
         r = session.post(url, json=payload, timeout=10)
 
-        if r.status_code != 200:
+        print(r.text)
             return 0
 
         data = r.json()
@@ -139,7 +140,7 @@ def analyze_content(text):
 # ===== GITHUB SEARCH =====
 def search_github():
     headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json"
     }
 
@@ -158,7 +159,7 @@ def search_github():
         try:
             r = session.get(url, headers=headers, timeout=15)
 
-            if r.status_code != 200:
+            print(r.text)
                 print("GitHub Search Error:", r.status_code)
                 continue
 
@@ -216,7 +217,7 @@ def search_github():
 # ===== GITHUB COMMITS =====
 def monitor_commits():
     headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json"
     }
 
@@ -227,7 +228,7 @@ def monitor_commits():
     try:
         r = session.get(url, headers=headers, timeout=15)
 
-        if r.status_code != 200:
+        print(r.text)
             print("Commits Error:", r.status_code)
             return results
 
@@ -427,11 +428,13 @@ while True:
         print("🚀 Iniciando polling...")
 
         app.run_polling(
-            drop_pending_updates=True,
-            allowed_updates=["message"],
-            close_loop=False,
-            stop_signals=None
-        )
+    drop_pending_updates=True,
+    allowed_updates=Update.ALL_TYPES,
+    close_loop=False,
+    stop_signals=None,
+    poll_interval=3,
+    timeout=30
+)
 
     except Conflict:
 
