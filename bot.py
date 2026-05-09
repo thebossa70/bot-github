@@ -369,14 +369,24 @@ async def handle_message(update, context):
         print("HANDLE MESSAGE ERROR:", e)
 
 # ===== MAIN =====
+from telegram.error import Conflict
+import time
+
 async def setup(app):
     try:
-        await app.bot.delete_webhook(
-            drop_pending_updates=True
-        )
+        # borrar webhook
+        await app.bot.delete_webhook(drop_pending_updates=True)
+
+        # limpiar updates viejos
+        try:
+            await app.bot.get_updates(offset=-1)
+        except:
+            pass
+
         print("Webhook eliminado")
+
     except Exception as e:
-        print("Webhook Error:", e)
+        print("SETUP ERROR:", e)
 
 # ===== APP =====
 app = (
@@ -410,9 +420,35 @@ app.job_queue.run_repeating(
 print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 
 # ===== START =====
-app.run_polling(
-    drop_pending_updates=True,
-    allowed_updates=["message"],
-    close_loop=False,
-    stop_signals=None
-)
+while True:
+
+    try:
+
+        print("🚀 Iniciando polling...")
+
+        app.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message"],
+            close_loop=False,
+            stop_signals=None
+        )
+
+    except Conflict:
+
+        print("⚠️ Conflicto detectado. Cerrando sesiones viejas...")
+
+        try:
+            requests.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook",
+                timeout=10
+            )
+        except:
+            pass
+
+        time.sleep(15)
+
+    except Exception as e:
+
+        print("❌ ERROR GENERAL:", e)
+
+        time.sleep(15)
