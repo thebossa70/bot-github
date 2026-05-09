@@ -147,12 +147,14 @@ def search_github():
 
     for term in SEARCH_TERMS:
 
+        time.sleep(2)
+
         url = (
             "https://api.github.com/search/code"
             f"?q={term}+in:file+extension:py+extension:js"
             "&sort=indexed"
             "&order=desc"
-            "&per_page=5"
+            "&per_page=2"
         )
 
         try:
@@ -423,7 +425,7 @@ app.add_handler(
 # ===== JOB =====
 app.job_queue.run_repeating(
     github_monitor,
-    interval=60,
+    interval=300,
     first=10,
     name="github_monitor"
 )
