@@ -433,29 +433,52 @@ app.job_queue.run_repeating(
 print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 
 # ===== START =====
-while True:
+async def main():
 
-    try:
+    while True:
 
-        print("🚀 Iniciando polling...")
+        try:
 
-        app.run_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
-            close_loop=False,
-            stop_signals=None,
-            poll_interval=3,
-            timeout=30
-        )
+            print("🚀 Iniciando bot...")
 
-    except Conflict:
+            await app.initialize()
+            await app.start()
 
-        print("⚠️ Conflicto detectado")
+            await app.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES
+            )
 
-        time.sleep(15)
+            while True:
+                await asyncio.sleep(60)
 
-    except Exception as e:
+        except Conflict:
 
-        print("❌ ERROR GENERAL:", e)
+            print("⚠️ Otra instancia detectada...")
+            await asyncio.sleep(20)
 
-        time.sleep(15)
+        except Exception as e:
+
+            print("❌ ERROR GENERAL:", e)
+            await asyncio.sleep(20)
+
+        finally:
+
+            try:
+                await app.updater.stop()
+            except:
+                pass
+
+            try:
+                await app.stop()
+            except:
+                pass
+
+            try:
+                await app.shutdown()
+            except:
+                pass
+
+# ===== RUN =====
+if __name__ == "__main__":
+    asyncio.run(main())
