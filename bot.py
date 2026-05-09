@@ -1,7 +1,14 @@
 import os
 import re
+import asyncio
 import requests
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 # ===== VARIABLES =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -19,199 +26,390 @@ SEARCH_TERMS = [
     "PRIVATE_KEY"
 ]
 
+# evitar crecimiento infinito memoria
+MAX_SEEN = 5000
+
 SEEN_URLS = set()
 SEEN_COMMITS = set()
+
+# protección overlap
+monitor_running = False
+
+# ===== SESSION =====
+session = requests.Session()
 
 # ===== REGEX =====
 ETH_REGEX = r"\b0x[a-fA-F0-9]{40}\b"
 SOL_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
 PRIVATE_KEY_REGEX = r"\b([A-Fa-f0-9]{64}|[1-9A-HJ-NP-Za-km-z]{64,})\b"
 
+# ===== CLEANUP =====
+def cleanup_sets():
+    global SEEN_URLS
+    global SEEN_COMMITS
+
+    if len(SEEN_URLS) > MAX_SEEN:
+        SEEN_URLS = set(list(SEEN_URLS)[-2000:])
+
+    if len(SEEN_COMMITS) > MAX_SEEN:
+        SEEN_COMMITS = set(list(SEEN_COMMITS)[-2000:])
+
 # ===== ETH BALANCE =====
 def get_eth_balance(address):
     try:
-        url = f"https://api.etherscan.io/api?module=account&action=balance&address={address}&tag=latest&apikey={ETHERSCAN_API_KEY}"
-        r = requests.get(url, timeout=10).json()
-        if r["status"] != "1":
+        url = (
+            "https://api.etherscan.io/api"
+            f"?module=account"
+            f"&action=balance"
+            f"&address={address}"
+            f"&tag=latest"
+            f"&apikey={ETHERSCAN_API_KEY}"
+        )
+
+        r = session.get(url, timeout=10)
+
+        if r.status_code != 200:
             return 0
-        return int(r["result"]) / 1e18
-    except:
+
+        data = r.json()
+
+        if data.get("status") != "1":
+            return 0
+
+        return int(data["result"]) / 1e18
+
+    except Exception as e:
+        print("ETH ERROR:", e)
         return 0
 
 # ===== SOL BALANCE =====
 def get_sol_balance(address):
     try:
         url = "https://api.mainnet-beta.solana.com"
+
         payload = {
-            "jsonrpc":"2.0",
-            "id":1,
-            "method":"getBalance",
-            "params":[address]
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getBalance",
+            "params": [address]
         }
-        r = requests.post(url, json=payload, timeout=10).json()
-        return r["result"]["value"] / 1e9
-    except:
+
+        r = session.post(url, json=payload, timeout=10)
+
+        if r.status_code != 200:
+            return 0
+
+        data = r.json()
+
+        return data.get("result", {}).get("value", 0) / 1e9
+
+    except Exception as e:
+        print("SOL ERROR:", e)
         return 0
 
 # ===== ANALISIS =====
 def analyze_content(text):
     findings = []
 
-    # ETH
-    for addr in re.findall(ETH_REGEX, text):
-        bal = get_eth_balance(addr)
-        if bal > 0:
-            findings.append(f"🟣 ETH: {addr} | 💰 {bal:.4f}")
+    try:
+        # ETH
+        for addr in set(re.findall(ETH_REGEX, text)):
+            bal = get_eth_balance(addr)
 
-    # SOL
-    for addr in re.findall(SOL_REGEX, text):
-        bal = get_sol_balance(addr)
-        if bal > 0:
-            findings.append(f"🟢 SOL: {addr} | 💰 {bal:.4f}")
+            if bal > 0:
+                findings.append(f"🟣 ETH: {addr} | 💰 {bal:.4f}")
 
-    # PRIVATE KEY
-    if re.search(PRIVATE_KEY_REGEX, text):
-        findings.append("🔑 POSIBLE PRIVATE KEY DETECTADA")
+        # SOL
+        for addr in set(re.findall(SOL_REGEX, text)):
+            bal = get_sol_balance(addr)
+
+            if bal > 0:
+                findings.append(f"🟢 SOL: {addr} | 💰 {bal:.4f}")
+
+        # PRIVATE KEY
+        if re.search(PRIVATE_KEY_REGEX, text):
+            findings.append("🔑 POSIBLE PRIVATE KEY DETECTADA")
+
+    except Exception as e:
+        print("ANALYZE ERROR:", e)
 
     return findings
 
 # ===== GITHUB SEARCH =====
 def search_github():
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
+    }
+
     results = []
 
     for term in SEARCH_TERMS:
-        url = f"https://api.github.com/search/code?q={term}+in:file+extension:py+extension:js&sort=indexed&order=desc"
+
+        url = (
+            "https://api.github.com/search/code"
+            f"?q={term}+in:file+extension:py+extension:js"
+            "&sort=indexed"
+            "&order=desc"
+            "&per_page=5"
+        )
 
         try:
-            r = requests.get(url, headers=headers, timeout=10).json()
+            r = session.get(url, headers=headers, timeout=15)
 
-            for item in r.get("items", [])[:5]:
-                file_url = item["html_url"]
+            if r.status_code != 200:
+                print("GitHub Search Error:", r.status_code)
+                continue
+
+            data = r.json()
+
+            for item in data.get("items", []):
+
+                file_url = item.get("html_url")
+
+                if not file_url:
+                    continue
 
                 if file_url in SEEN_URLS:
                     continue
 
                 SEEN_URLS.add(file_url)
 
-                raw_url = file_url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+                raw_url = (
+                    file_url
+                    .replace("github.com", "raw.githubusercontent.com")
+                    .replace("/blob/", "/")
+                )
 
                 try:
-                    content = requests.get(raw_url, timeout=5).text[:4000]
-                except:
+                    content = session.get(
+                        raw_url,
+                        timeout=10
+                    ).text[:4000]
+
+                except Exception:
                     continue
 
-                if not any(k.lower() in content.lower() for k in SEARCH_TERMS):
+                if not any(
+                    k.lower() in content.lower()
+                    for k in SEARCH_TERMS
+                ):
                     continue
 
                 findings = analyze_content(content)
 
                 if findings:
-                    msg = f"🚨 LEAK EN ARCHIVO 🚨\n\n{file_url}\n\n"
-                    msg += "\n".join(findings)
+                    msg = (
+                        "🚨 LEAK EN ARCHIVO 🚨\n\n"
+                        f"{file_url}\n\n"
+                        + "\n".join(findings)
+                    )
+
                     results.append(msg)
 
-        except:
-            continue
+        except Exception as e:
+            print("SEARCH ERROR:", e)
 
     return results
 
 # ===== GITHUB COMMITS =====
 def monitor_commits():
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
+    }
+
     url = "https://api.github.com/events"
+
     results = []
 
     try:
-        r = requests.get(url, headers=headers, timeout=10).json()
+        r = session.get(url, headers=headers, timeout=15)
 
-        for event in r:
-            if event["type"] != "PushEvent":
+        if r.status_code != 200:
+            print("Commits Error:", r.status_code)
+            return results
+
+        data = r.json()
+
+        for event in data:
+
+            if event.get("type") != "PushEvent":
                 continue
 
-            repo = event["repo"]["name"]
+            repo = event.get("repo", {}).get("name", "unknown")
 
-            for commit in event["payload"]["commits"]:
-                sha = commit["sha"]
+            for commit in event.get("payload", {}).get("commits", []):
+
+                sha = commit.get("sha")
+
+                if not sha:
+                    continue
 
                 if sha in SEEN_COMMITS:
                     continue
 
                 SEEN_COMMITS.add(sha)
 
-                message = commit["message"]
+                message = commit.get("message", "")
 
-                if not any(k.lower() in message.lower() for k in SEARCH_TERMS):
+                if not any(
+                    k.lower() in message.lower()
+                    for k in SEARCH_TERMS
+                ):
                     continue
 
-                msg = f"🚨 POSIBLE LEAK EN COMMIT 🚨\n\n📦 {repo}\n📝 {message}\n🔗 https://github.com/{repo}"
+                msg = (
+                    "🚨 POSIBLE LEAK EN COMMIT 🚨\n\n"
+                    f"📦 {repo}\n"
+                    f"📝 {message}\n"
+                    f"🔗 https://github.com/{repo}"
+                )
+
                 results.append(msg)
 
-    except:
-        pass
+    except Exception as e:
+        print("COMMITS ERROR:", e)
 
     return results
 
 # ===== JOB =====
 async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
-    results = []
+
+    global monitor_running
+
+    if monitor_running:
+        print("Monitor ya ejecutándose...")
+        return
+
+    monitor_running = True
 
     try:
-        results += search_github()
-    except Exception as e:
-        print("ERROR search_github:", e)
 
-    try:
-        results += monitor_commits()
-    except Exception as e:
-        print("ERROR monitor_commits:", e)
+        cleanup_sets()
 
-    for r in results:
+        results = []
+
         try:
-            await context.bot.send_message(chat_id=CHAT_ID, text=r)
+            results.extend(search_github())
         except Exception as e:
-            print("ERROR sending:", e)
+            print("ERROR search_github:", e)
+
+        try:
+            results.extend(monitor_commits())
+        except Exception as e:
+            print("ERROR monitor_commits:", e)
+
+        # evitar spam masivo
+        results = results[:10]
+
+        for r in results:
+            try:
+                await context.bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=r[:4000]
+                )
+
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                print("ERROR sending:", e)
+
+    except Exception as e:
+        print("MONITOR ERROR:", e)
+
+    finally:
+        monitor_running = False
 
 # ===== RESPUESTA MANUAL =====
-async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+async def handle_message(update, context):
 
-    findings = []
+    try:
 
-    # detectar wallets en cualquier texto
-    for addr in re.findall(ETH_REGEX, text):
-        bal = get_eth_balance(addr)
-        findings.append(f"🟣 ETH: {addr} | 💰 {bal:.6f}")
+        text = update.message.text.strip()
 
-    for addr in re.findall(SOL_REGEX, text):
-        bal = get_sol_balance(addr)
-        findings.append(f"🟢 SOL: {addr} | 💰 {bal:.6f}")
+        findings = []
 
-    # detectar private keys
-    if re.search(PRIVATE_KEY_REGEX, text):
-        findings.append("🔑 POSIBLE PRIVATE KEY DETECTADA")
+        # ETH
+        for addr in set(re.findall(ETH_REGEX, text)):
+            bal = get_eth_balance(addr)
 
-    if findings:
-        await update.message.reply_text("\n".join(findings))
-    else:
-        await update.message.reply_text("❌ No se detectó nada válido")
+            findings.append(
+                f"🟣 ETH: {addr} | 💰 {bal:.6f}"
+            )
+
+        # SOL
+        for addr in set(re.findall(SOL_REGEX, text)):
+            bal = get_sol_balance(addr)
+
+            findings.append(
+                f"🟢 SOL: {addr} | 💰 {bal:.6f}"
+            )
+
+        # PRIVATE KEY
+        if re.search(PRIVATE_KEY_REGEX, text):
+            findings.append(
+                "🔑 POSIBLE PRIVATE KEY DETECTADA"
+            )
+
+        if findings:
+
+            await update.message.reply_text(
+                "\n".join(findings)[:4000]
+            )
+
+        else:
+
+            await update.message.reply_text(
+                "❌ No se detectó nada válido"
+            )
+
+    except Exception as e:
+        print("HANDLE MESSAGE ERROR:", e)
 
 # ===== MAIN =====
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-# 🔥 eliminar webhook correctamente (sin async manual)
 async def setup(app):
-    await app.bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await app.bot.delete_webhook(
+            drop_pending_updates=True
+        )
+        print("Webhook eliminado")
+    except Exception as e:
+        print("Webhook Error:", e)
+
+# ===== APP =====
+app = (
+    ApplicationBuilder()
+    .token(TELEGRAM_TOKEN)
+    .read_timeout(30)
+    .write_timeout(30)
+    .connect_timeout(30)
+    .pool_timeout(30)
+    .build()
+)
 
 app.post_init = setup
 
-# handler mensajes
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# ===== HANDLERS =====
+app.add_handler(
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_message
+    )
+)
 
-# job automático
-app.job_queue.run_repeating(github_monitor, interval=30, first=5)
+# ===== JOB =====
+app.job_queue.run_repeating(
+    github_monitor,
+    interval=60,
+    first=10,
+    name="github_monitor"
+)
 
 print("🤖 BOT PRO ACTIVO (TIEMPO REAL + DINERO)")
 
-# 🚀 iniciar bot (ESTA es la forma correcta)
-app.run_polling()
+# ===== START =====
+app.run_polling(
+    drop_pending_updates=True,
+    allowed_updates=["message"]
+)
