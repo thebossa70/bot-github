@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import asyncio
 import requests
 
@@ -28,13 +29,11 @@ SEARCH_TERMS = [
     "PRIVATE_KEY"
 ]
 
-# evitar crecimiento infinito memoria
 MAX_SEEN = 5000
 
 SEEN_URLS = set()
 SEEN_COMMITS = set()
 
-# protección overlap
 monitor_running = False
 
 # ===== SESSION =====
@@ -70,7 +69,8 @@ def get_eth_balance(address):
 
         r = session.get(url, timeout=10)
 
-        print(r.text)
+        if r.status_code != 200:
+            print("ETH API ERROR:", r.text)
             return 0
 
         data = r.json()
@@ -98,7 +98,8 @@ def get_sol_balance(address):
 
         r = session.post(url, json=payload, timeout=10)
 
-        print(r.text)
+        if r.status_code != 200:
+            print("SOL API ERROR:", r.text)
             return 0
 
         data = r.json()
@@ -109,26 +110,23 @@ def get_sol_balance(address):
         print("SOL ERROR:", e)
         return 0
 
-# ===== ANALISIS =====
+# ===== ANALYSIS =====
 def analyze_content(text):
     findings = []
 
     try:
-        # ETH
         for addr in set(re.findall(ETH_REGEX, text)):
             bal = get_eth_balance(addr)
 
             if bal > 0:
                 findings.append(f"🟣 ETH: {addr} | 💰 {bal:.4f}")
 
-        # SOL
         for addr in set(re.findall(SOL_REGEX, text)):
             bal = get_sol_balance(addr)
 
             if bal > 0:
                 findings.append(f"🟢 SOL: {addr} | 💰 {bal:.4f}")
 
-        # PRIVATE KEY
         if re.search(PRIVATE_KEY_REGEX, text):
             findings.append("🔑 POSIBLE PRIVATE KEY DETECTADA")
 
@@ -139,6 +137,7 @@ def analyze_content(text):
 
 # ===== GITHUB SEARCH =====
 def search_github():
+
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json"
@@ -157,10 +156,16 @@ def search_github():
         )
 
         try:
-            r = session.get(url, headers=headers, timeout=15)
 
-            print(r.text)
+            r = session.get(
+                url,
+                headers=headers,
+                timeout=15
+            )
+
+            if r.status_code != 200:
                 print("GitHub Search Error:", r.status_code)
+                print(r.text)
                 continue
 
             data = r.json()
@@ -184,6 +189,7 @@ def search_github():
                 )
 
                 try:
+
                     content = session.get(
                         raw_url,
                         timeout=10
@@ -201,6 +207,7 @@ def search_github():
                 findings = analyze_content(content)
 
                 if findings:
+
                     msg = (
                         "🚨 LEAK EN ARCHIVO 🚨\n\n"
                         f"{file_url}\n\n"
@@ -214,22 +221,27 @@ def search_github():
 
     return results
 
-# ===== GITHUB COMMITS =====
+# ===== COMMITS =====
 def monitor_commits():
+
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json"
     }
 
-    url = "https://api.github.com/events"
-
     results = []
 
     try:
-        r = session.get(url, headers=headers, timeout=15)
 
-        print(r.text)
+        r = session.get(
+            "https://api.github.com/events",
+            headers=headers,
+            timeout=15
+        )
+
+        if r.status_code != 200:
             print("Commits Error:", r.status_code)
+            print(r.text)
             return results
 
         data = r.json()
@@ -239,9 +251,15 @@ def monitor_commits():
             if event.get("type") != "PushEvent":
                 continue
 
-            repo = event.get("repo", {}).get("name", "unknown")
+            repo = event.get(
+                "repo",
+                {}
+            ).get("name", "unknown")
 
-            for commit in event.get("payload", {}).get("commits", []):
+            for commit in event.get(
+                "payload",
+                {}
+            ).get("commits", []):
 
                 sha = commit.get("sha")
 
@@ -302,20 +320,21 @@ async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("ERROR monitor_commits:", e)
 
-        # evitar spam masivo
         results = results[:10]
 
-        for r in results:
+        for result in results:
+
             try:
+
                 await context.bot.send_message(
                     chat_id=CHAT_ID,
-                    text=r[:4000]
+                    text=result[:4000]
                 )
 
                 await asyncio.sleep(1)
 
             except Exception as e:
-                print("ERROR sending:", e)
+                print("SEND ERROR:", e)
 
     except Exception as e:
         print("MONITOR ERROR:", e)
@@ -323,7 +342,7 @@ async def github_monitor(context: ContextTypes.DEFAULT_TYPE):
     finally:
         monitor_running = False
 
-# ===== RESPUESTA MANUAL =====
+# ===== MESSAGE HANDLER =====
 async def handle_message(update, context):
 
     try:
@@ -332,7 +351,6 @@ async def handle_message(update, context):
 
         findings = []
 
-        # ETH
         for addr in set(re.findall(ETH_REGEX, text)):
             bal = get_eth_balance(addr)
 
@@ -340,7 +358,6 @@ async def handle_message(update, context):
                 f"🟣 ETH: {addr} | 💰 {bal:.6f}"
             )
 
-        # SOL
         for addr in set(re.findall(SOL_REGEX, text)):
             bal = get_sol_balance(addr)
 
@@ -348,7 +365,6 @@ async def handle_message(update, context):
                 f"🟢 SOL: {addr} | 💰 {bal:.6f}"
             )
 
-        # PRIVATE KEY
         if re.search(PRIVATE_KEY_REGEX, text):
             findings.append(
                 "🔑 POSIBLE PRIVATE KEY DETECTADA"
@@ -367,22 +383,16 @@ async def handle_message(update, context):
             )
 
     except Exception as e:
-        print("HANDLE MESSAGE ERROR:", e)
+        print("HANDLE ERROR:", e)
 
-# ===== MAIN =====
-from telegram.error import Conflict
-import time
-
+# ===== SETUP =====
 async def setup(app):
-    try:
-        # borrar webhook
-        await app.bot.delete_webhook(drop_pending_updates=True)
 
-        # limpiar updates viejos
-        try:
-            await app.bot.get_updates(offset=-1)
-        except:
-            pass
+    try:
+
+        await app.bot.delete_webhook(
+            drop_pending_updates=True
+        )
 
         print("Webhook eliminado")
 
@@ -402,7 +412,7 @@ app = (
 
 app.post_init = setup
 
-# ===== HANDLERS =====
+# ===== HANDLER =====
 app.add_handler(
     MessageHandler(
         filters.TEXT & ~filters.COMMAND,
@@ -428,25 +438,17 @@ while True:
         print("🚀 Iniciando polling...")
 
         app.run_polling(
-    drop_pending_updates=True,
-    allowed_updates=Update.ALL_TYPES,
-    close_loop=False,
-    stop_signals=None,
-    poll_interval=3,
-    timeout=30
-)
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+            close_loop=False,
+            stop_signals=None,
+            poll_interval=3,
+            timeout=30
+        )
 
     except Conflict:
 
-        print("⚠️ Conflicto detectado. Cerrando sesiones viejas...")
-
-        try:
-            requests.get(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook",
-                timeout=10
-            )
-        except:
-            pass
+        print("⚠️ Conflicto detectado")
 
         time.sleep(15)
 
